@@ -388,33 +388,35 @@ function DetailStepper({
 }) {
   return (
     <View
-      className="min-h-[68px] flex-row items-center rounded-[20px] border border-line bg-carbon px-3 py-2"
+      className="min-h-[68px] flex-row items-center justify-between rounded-[20px] border border-line bg-carbon px-3 py-2"
       style={{ boxShadow: "0 14px 28px rgba(17, 19, 24, 0.06)" }}
     >
-      <Text className="w-[108px] text-[11px] font-black uppercase text-ash">{label}</Text>
-      <Pressable
-        accessibilityLabel={`Decrease ${label}`}
-        className="h-9 w-9 items-center justify-center rounded-xl border border-line bg-white"
-        disabled={value <= min}
-        onPress={() => onChange(Math.max(min, value - step))}
-      >
-        <Minus color={colors.text} size={17} />
-      </Pressable>
-      <View className="h-10 min-w-[70px] items-center justify-center rounded-xl bg-white px-3">
-        <Text allowFontScaling={false} className="text-center text-lg font-black text-bone">
-          {value}
-          {suffix}
-        </Text>
+      <View className="flex-row items-center">
+        <Pressable
+          accessibilityLabel={`Decrease ${label}`}
+          className="h-9 w-9 items-center justify-center rounded-xl border border-line bg-white"
+          disabled={value <= min}
+          onPress={() => onChange(Math.max(min, value - step))}
+        >
+          <Minus color={colors.text} size={17} />
+        </Pressable>
+        <View className="h-10 min-w-[70px] items-center justify-center rounded-xl bg-white px-3">
+          <Text allowFontScaling={false} className="text-center text-lg font-black text-bone">
+            {value}
+            {suffix}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel={`Increase ${label}`}
+          className="h-9 w-9 items-center justify-center rounded-xl bg-electric"
+          disabled={value >= max}
+          onPress={() => onChange(Math.min(max, value + step))}
+          style={{ boxShadow: "0 10px 24px rgba(225, 29, 72, 0.2)" }}
+        >
+          <Plus color="#FFFFFF" size={17} />
+        </Pressable>
       </View>
-      <Pressable
-        accessibilityLabel={`Increase ${label}`}
-        className="h-9 w-9 items-center justify-center rounded-xl bg-electric"
-        disabled={value >= max}
-        onPress={() => onChange(Math.min(max, value + step))}
-        style={{ boxShadow: "0 10px 24px rgba(225, 29, 72, 0.2)" }}
-      >
-        <Plus color="#FFFFFF" size={17} />
-      </Pressable>
+      <Text className="min-w-0 flex-1 pl-4 text-right text-[11px] font-black uppercase text-ash">{label}</Text>
     </View>
   );
 }
