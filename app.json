@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Apex Gym",
+    "slug": "apex-gym",
+    "scheme": "apexgym",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/brand-logo.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-notifications",
+      "expo-sqlite",
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-video"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.assagdi.apexgym",
+      "adaptiveIcon": {
+        "backgroundColor": "#AD151B",
+        "foregroundImage": "./assets/brand-logo.png",
+        "monochromeImage": "./assets/brand-logo.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/brand-logo.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "98618466-8fcc-49fe-be6d-b198e35daba0"
+      }
+    },
+    "owner": "assagdi.abdell"
+  }
+}
