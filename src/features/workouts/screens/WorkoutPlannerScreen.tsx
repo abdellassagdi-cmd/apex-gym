@@ -200,14 +200,18 @@ function mapContentProgram(content: CloudProgram, exercises: Map<string, Exercis
 
 type WorkoutPlannerScreenProps = {
   accountEmail?: string | null;
+  isAuthenticated?: boolean;
   isCloudEnabled?: boolean;
+  onRequestAuth?: () => void;
   onSignOut?: () => Promise<void>;
   storageScope?: string;
 };
 
 export function WorkoutPlannerScreen({
   accountEmail = null,
+  isAuthenticated = false,
   isCloudEnabled = false,
+  onRequestAuth,
   onSignOut,
   storageScope = "local-device",
 }: WorkoutPlannerScreenProps) {
@@ -432,6 +436,7 @@ export function WorkoutPlannerScreen({
           ) : (
             <ProfileTab
               accountEmail={accountEmail}
+              isAuthenticated={isAuthenticated}
               isCloudEnabled={isCloudEnabled}
               profile={athleteProfile}
               reminderSettings={reminderSettings}
@@ -440,6 +445,7 @@ export function WorkoutPlannerScreen({
               membership={membership}
               userId={storageScope}
               onMembershipRefresh={async () => setMembership(await loadMembership(storageScope))}
+              onRequestAuth={onRequestAuth}
               onEditProfile={() => setProfileEditorVisible(true)}
               onOpenReminder={() => setReminderVisible(true)}
               onOpenSettings={setSettingsPage}
@@ -959,6 +965,7 @@ function LibraryTab({
 
 function ProfileTab({
   accountEmail,
+  isAuthenticated,
   isCloudEnabled,
   profile,
   reminderSettings,
@@ -967,12 +974,14 @@ function ProfileTab({
   membership,
   userId,
   onMembershipRefresh,
+  onRequestAuth,
   onEditProfile,
   onOpenReminder,
   onOpenSettings,
   onSignOut,
 }: {
   accountEmail?: string | null;
+  isAuthenticated: boolean;
   isCloudEnabled: boolean;
   profile: AthleteProfile;
   reminderSettings: WorkoutReminderSettings;
@@ -981,6 +990,7 @@ function ProfileTab({
   membership: MembershipState;
   userId: string;
   onMembershipRefresh: () => Promise<void>;
+  onRequestAuth?: () => void;
   onEditProfile: () => void;
   onOpenReminder: () => void;
   onOpenSettings: (page: SettingsPage) => void;
@@ -1016,7 +1026,7 @@ function ProfileTab({
         </Text>
         <View className="mt-4 rounded-full bg-carbon px-4 py-2">
           <Text className="text-xs font-black text-steel">
-            {isCloudEnabled ? accountEmail ?? "Cloud account" : "Local preview mode"}
+            {isCloudEnabled ? accountEmail ?? "Cloud account" : "Guest · Free plan"}
           </Text>
         </View>
       </View>
@@ -1127,7 +1137,7 @@ function ProfileTab({
           </Pressable>
         ))}
       </View>
-      {isCloudEnabled && onSignOut ? (
+      {isAuthenticated && onSignOut ? (
         <Pressable
           accessibilityLabel="Sign out"
           accessibilityRole="button"
@@ -1137,12 +1147,17 @@ function ProfileTab({
           <Text className="text-sm font-black uppercase text-electric">Sign out</Text>
         </Pressable>
       ) : (
-        <View className="rounded-[20px] border border-electric/20 bg-electric/5 p-4">
-          <Text className="text-xs font-black uppercase text-electric">Supabase setup pending</Text>
-          <Text className="mt-2 text-sm font-semibold leading-5 text-steel">
-            Add Supabase URL and publishable key to enable login and cloud-synced user data.
+        <Pressable
+          accessibilityLabel="Log in to sync progress"
+          accessibilityRole="button"
+          className="rounded-[20px] bg-electric p-4"
+          onPress={onRequestAuth}
+        >
+          <Text className="text-center text-sm font-black uppercase text-white">Log in / Create account</Text>
+          <Text className="mt-2 text-center text-xs font-semibold leading-5 text-white/80">
+            Sync progress, keep your plan, and unlock subscription upgrades.
           </Text>
-        </View>
+        </Pressable>
       )}
     </ScrollView>
   );

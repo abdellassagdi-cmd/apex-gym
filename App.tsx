@@ -2,7 +2,7 @@ import "./global.css";
 
 import { StatusBar } from "expo-status-bar";
 import { Component, useEffect, useState, type ReactNode } from "react";
-import { Text, View } from "react-native";
+import { Image, Pressable, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthGate } from "./src/features/auth/AuthGate";
@@ -50,6 +50,7 @@ export default function App() {
       ? true
       : storage.get("apex-gym:onboarding-complete", false),
   );
+  const [guestStarted, setGuestStarted] = useState(false);
 
   useEffect(() => {
     if (forceOnboarding) return;
@@ -60,21 +61,65 @@ export default function App() {
     <AppErrorBoundary>
       <SafeAreaProvider>
         <StatusBar style="dark" />
-        {isOnboardingComplete ? (
-          <AuthGate>
-            {({ email, isCloudEnabled, onSignOut, userId }) => (
+        <AuthGate>
+          {({ email, isAuthenticated, isCloudEnabled, onRequestAuth, onSignOut, userId }) =>
+            isOnboardingComplete ? (
               <WorkoutPlannerScreen
                 accountEmail={email}
+                isAuthenticated={isAuthenticated}
                 isCloudEnabled={isCloudEnabled}
+                onRequestAuth={onRequestAuth}
                 onSignOut={onSignOut}
                 storageScope={userId}
               />
-            )}
-          </AuthGate>
-        ) : (
-          <OnboardingFlow onComplete={() => setIsOnboardingComplete(true)} />
-        )}
+            ) : guestStarted || isAuthenticated ? (
+              <OnboardingFlow onComplete={() => setIsOnboardingComplete(true)} />
+            ) : (
+              <EntryChoice onLogin={onRequestAuth} onSkip={() => setGuestStarted(true)} />
+            )
+          }
+        </AuthGate>
       </SafeAreaProvider>
     </AppErrorBoundary>
+  );
+}
+
+function EntryChoice({ onLogin, onSkip }: { onLogin: () => void; onSkip: () => void }) {
+  return (
+    <View className="flex-1 justify-between bg-[#F7F8FC] px-6 pb-10 pt-16">
+      <View className="items-center">
+        <Image
+          accessibilityLabel="Apex Gym"
+          resizeMode="contain"
+          source={require("./assets/brand-logo.png")}
+          style={{ borderRadius: 28, height: 112, width: 112 }}
+        />
+        <Text className="mt-8 text-center text-5xl font-black text-bone">Apex Gym</Text>
+        <Text className="mt-4 text-center text-base font-semibold leading-6 text-ash">
+          Start free without an account, or log in to sync your workouts and subscription.
+        </Text>
+      </View>
+      <View className="gap-3">
+        <Pressable
+          accessibilityLabel="Log in or create account"
+          accessibilityRole="button"
+          className="h-16 items-center justify-center rounded-full bg-electric"
+          onPress={onLogin}
+        >
+          <Text className="text-base font-black uppercase text-white">Log in / Create account</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Continue as guest"
+          accessibilityRole="button"
+          className="h-16 items-center justify-center rounded-full border border-line bg-white"
+          onPress={onSkip}
+        >
+          <Text className="text-base font-black uppercase text-bone">Continue as guest</Text>
+        </Pressable>
+        <Text className="text-center text-xs font-semibold leading-5 text-ash">
+          Guest access uses the Free plan and includes ads. You can create an account later from Profile.
+        </Text>
+      </View>
+    </View>
   );
 }

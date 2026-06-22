@@ -19,7 +19,9 @@ WebBrowser.maybeCompleteAuthSession();
 
 type AuthContext = {
   email: string | null;
+  isAuthenticated: boolean;
   isCloudEnabled: boolean;
+  onRequestAuth: () => void;
   onSignOut: () => Promise<void>;
   userId: string;
 };
@@ -48,6 +50,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [applyingPlan, setApplyingPlan] = useState(false);
+  const [authVisible, setAuthVisible] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -66,6 +69,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      if (session?.user) setAuthVisible(false);
     });
 
     return () => {
@@ -91,7 +95,9 @@ export function AuthGate({ children }: AuthGateProps) {
   const authContext = useMemo<AuthContext>(
     () => ({
       email: user?.email ?? null,
+      isAuthenticated: Boolean(user),
       isCloudEnabled: Boolean(supabase && user),
+      onRequestAuth: () => setAuthVisible(true),
       onSignOut: async () => {
         await supabase?.auth.signOut();
       },
@@ -113,14 +119,14 @@ export function AuthGate({ children }: AuthGateProps) {
     return children(authContext);
   }
 
-  if (!user) {
-    return <AuthScreen />;
+  if (!user && authVisible) {
+    return <AuthScreen onClose={() => setAuthVisible(false)} />;
   }
 
   return children(authContext);
 }
 
-function AuthScreen() {
+function AuthScreen({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -260,6 +266,14 @@ function AuthScreen() {
       contentContainerClassName="flex-grow justify-center gap-5 px-6 py-10"
       keyboardShouldPersistTaps="handled"
     >
+      <Pressable
+        accessibilityLabel="Close login"
+        accessibilityRole="button"
+        className="h-11 self-start justify-center rounded-full border border-line bg-white px-5"
+        onPress={onClose}
+      >
+        <Text className="text-xs font-black uppercase text-bone">Back</Text>
+      </Pressable>
       <View className="items-center">
         <Image
           resizeMode="contain"
