@@ -27,6 +27,7 @@ import {
   Heart,
   ListFilter,
   MoreVertical,
+  Plus,
   Crown,
   MessageCircle,
   Send,
@@ -41,6 +42,7 @@ import { AppDock, type AppDockTab } from "../components/AppDock";
 import { ExerciseDetailSheet } from "../components/ExerciseDetailSheet";
 import {
   NotificationCenter,
+  ProgramBuilderSheet,
   ProfileEditorSheet,
   SettingsDetailSheet,
   WorkoutReminderSheet,
@@ -67,6 +69,7 @@ import {
 import { configureWorkoutNotifications, syncWorkoutReminders } from "../services/workoutReminders";
 import { freeMembership, loadExerciseContent, loadMembership, loadProgramContent, sendMemberMessage, type MembershipState } from "../services/membership";
 import { syncOnboardingIntake } from "../services/member-intake";
+import { emptySavedContent, loadSavedContent, saveSavedContent, type SavedContent } from "../services/saved-content";
 import { buildAthleteProfile } from "../domain/recommendations";
 import type { OnboardingProfile } from "../../onboarding/types";
 import type { Exercise, MuscleGroup } from "../types";
@@ -96,6 +99,7 @@ const benchImage =
 const profileKey = "apex-gym:athlete-profile";
 const reminderKey = "apex-gym:workout-reminder-settings";
 const settingsKey = "apex-gym:profile-settings";
+const savedContentKey = "apex-gym:saved-content";
 
 const defaultAthleteProfile: AthleteProfile = {
   name: "Apex Member",
@@ -228,9 +232,13 @@ export function WorkoutPlannerScreen({
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [progressCalendarVisible, setProgressCalendarVisible] = useState(false);
   const [profileEditorVisible, setProfileEditorVisible] = useState(false);
+  const [programBuilderVisible, setProgramBuilderVisible] = useState(false);
   const [reminderVisible, setReminderVisible] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
   const [membership, setMembership] = useState<MembershipState>(freeMembership);
+  const [savedContent, setSavedContent] = useState<SavedContent>(() =>
+    storage.get(`${savedContentKey}:${storageScope}`, emptySavedContent),
+  );
   const [athleteProfile, setAthleteProfile] = useState(() => initialAthleteProfile(storageScope));
   const [reminderSettings, setReminderSettings] = useState(() =>
     storage.get<WorkoutReminderSettings>(`${reminderKey}:${storageScope}`, defaultReminderSettings),
@@ -297,6 +305,38 @@ export function WorkoutPlannerScreen({
     let cancelled = false;
     void loadMembership(storageScope).then((next) => { if (!cancelled) setMembership(next); })
       .catch((error) => console.warn("Could not load membership", error));
+    return () => { cancelled = true; };
+  }, [isCloudEnabled, storageScope]);
+
+  useEffect(() => {
+    const scoped = storage.get<SavedContent>(`${savedContentKey}:${storageScope}`, emptySavedContent);
+    const guest = isCloudEnabled
+      ? storage.get<SavedContent>(`${savedContentKey}:local-device`, emptySavedContent)
+      : emptySavedContent;
+    const local: SavedContent = {
+      favoriteExerciseIds: Array.from(new Set([...guest.favoriteExerciseIds, ...scoped.favoriteExerciseIds])),
+      favoriteProgramIds: Array.from(new Set([...guest.favoriteProgramIds, ...scoped.favoriteProgramIds])),
+      myPrograms: Array.from(new Map([...guest.myPrograms, ...scoped.myPrograms].map((program) => [program.id, program])).values()),
+      coachPrograms: scoped.coachPrograms,
+    };
+    setSavedContent(local);
+    if (!isCloudEnabled || storageScope === "local-device") return;
+    let cancelled = false;
+    void loadSavedContent(storageScope)
+      .then(async (cloud) => {
+        if (cancelled) return;
+        const merged: SavedContent = {
+          favoriteExerciseIds: Array.from(new Set([...local.favoriteExerciseIds, ...cloud.favoriteExerciseIds])),
+          favoriteProgramIds: Array.from(new Set([...local.favoriteProgramIds, ...cloud.favoriteProgramIds])),
+          myPrograms: Array.from(new Map([...local.myPrograms, ...cloud.myPrograms].map((program) => [program.id, program])).values()),
+          coachPrograms: cloud.coachPrograms,
+        };
+        setSavedContent(merged);
+        storage.set(`${savedContentKey}:${storageScope}`, merged);
+        await saveSavedContent(storageScope, merged);
+        storage.remove(`${savedContentKey}:local-device`);
+      })
+      .catch((error) => console.warn("Could not load saved programs and favorites", formatError(error)));
     return () => { cancelled = true; };
   }, [isCloudEnabled, storageScope]);
 
@@ -403,6 +443,26 @@ export function WorkoutPlannerScreen({
     setSessionExercises(nextExercises);
   }
 
+  function updateSavedContent(update: (current: SavedContent) => SavedContent) {
+    setSavedContent((current) => {
+      const next = update(current);
+      storage.set(`${savedContentKey}:${storageScope}`, next);
+      if (isCloudEnabled) {
+        void saveSavedContent(storageScope, next).catch((error) =>
+          console.warn("Could not save programs and favorites", formatError(error)),
+        );
+      }
+      return next;
+    });
+  }
+
+  function toggleSavedId(key: "favoriteExerciseIds" | "favoriteProgramIds", id: string) {
+    updateSavedContent((current) => ({
+      ...current,
+      [key]: current[key].includes(id) ? current[key].filter((item) => item !== id) : [...current[key], id],
+    }));
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-[#F7F8FC]">
       <View className="flex-1">
@@ -428,11 +488,22 @@ export function WorkoutPlannerScreen({
             />
           ) : activeTab === "programs" ? (
             <ProgramsTab
+              coachPrograms={savedContent.coachPrograms}
+              favoriteProgramIds={savedContent.favoriteProgramIds}
+              myPrograms={savedContent.myPrograms}
+              onCreateProgram={() => setProgramBuilderVisible(true)}
               onOpenProgram={setActiveProgram}
+              onToggleFavorite={(id) => toggleSavedId("favoriteProgramIds", id)}
               programs={visiblePrograms}
             />
           ) : activeTab === "exercises" ? (
-            <LibraryTab exercises={exercises} membership={membership} onOpenExercise={setActiveExercise} />
+            <LibraryTab
+              exercises={exercises}
+              favoriteExerciseIds={savedContent.favoriteExerciseIds}
+              membership={membership}
+              onOpenExercise={setActiveExercise}
+              onToggleFavorite={(id) => toggleSavedId("favoriteExerciseIds", id)}
+            />
           ) : (
             <ProfileTab
               accountEmail={accountEmail}
@@ -474,6 +545,12 @@ export function WorkoutPlannerScreen({
             firstSession ? `${program.title}: ${firstSession.label}` : program.title,
           );
         }}
+      />
+      <ProgramBuilderSheet
+        exercises={exercises}
+        onClose={() => setProgramBuilderVisible(false)}
+        onSave={(program) => updateSavedContent((current) => ({ ...current, myPrograms: [program, ...current.myPrograms.filter((item) => item.id !== program.id)] }))}
+        visible={programBuilderVisible}
       />
       <WorkoutSessionOverlay
         exercises={sessionExercises}
@@ -835,13 +912,28 @@ function HeroInfo({ icon, label }: { icon: React.ReactNode; label: string }) {
 }
 
 function ProgramsTab({
+  coachPrograms,
+  favoriteProgramIds,
+  myPrograms,
+  onCreateProgram,
   onOpenProgram,
+  onToggleFavorite,
   programs,
 }: {
+  coachPrograms: TrainingProgram[];
+  favoriteProgramIds: string[];
+  myPrograms: TrainingProgram[];
+  onCreateProgram: () => void;
   onOpenProgram: (program: TrainingProgram) => void;
+  onToggleFavorite: (id: string) => void;
   programs: TrainingProgram[];
 }) {
   const [selectedTab, setSelectedTab] = useState<(typeof programTabs)[number]>("Library");
+  const displayedPrograms = selectedTab === "Library"
+    ? programs
+    : selectedTab === "My Programs"
+      ? [...coachPrograms, ...myPrograms]
+      : programs.filter((program) => favoriteProgramIds.includes(program.id));
 
   return (
     <ScrollView
@@ -870,25 +962,47 @@ function ProgramsTab({
 
       <SearchField placeholder="Search programs, goals..." />
 
-      <SectionHeader action="" title="Programs For You" />
+      {selectedTab === "My Programs" ? (
+        <Pressable
+          accessibilityLabel="Create a custom program"
+          accessibilityRole="button"
+          className="h-14 flex-row items-center justify-center gap-2 rounded-[20px] bg-electric"
+          onPress={onCreateProgram}
+        >
+          <Plus color="#FFFFFF" size={19} strokeWidth={3} />
+          <Text className="text-sm font-black uppercase text-white">Create program</Text>
+        </Pressable>
+      ) : null}
+
+      <SectionHeader action="" title={selectedTab === "Library" ? "All Programs" : selectedTab} />
       <View className="gap-3">
-        {programs.slice(0, 8).map((program) => (
-          <ProgramRow key={program.id} onPress={() => onOpenProgram(program)} program={program} />
+        {displayedPrograms.map((program) => (
+          <ProgramRow
+            favorite={favoriteProgramIds.includes(program.id)}
+            key={program.id}
+            onPress={() => onOpenProgram(program)}
+            onToggleFavorite={() => onToggleFavorite(program.id)}
+            program={program}
+          />
         ))}
       </View>
-      {!programs.length ? <View className="rounded-3xl bg-white p-6"><Text className="text-lg font-black text-bone">No program published for your level yet</Text><Text className="mt-2 text-sm leading-6 text-ash">Your admin can target a program to your fitness level from the dashboard.</Text></View> : null}
+      {!displayedPrograms.length ? <View className="rounded-3xl bg-white p-6"><Text className="text-lg font-black text-bone">Nothing here yet</Text><Text className="mt-2 text-sm leading-6 text-ash">{selectedTab === "Favorites" ? "Tap the heart on any program to keep it here." : selectedTab === "My Programs" ? "Create your own program or wait for a coach assignment." : "No program has been published for your level yet."}</Text></View> : null}
     </ScrollView>
   );
 }
 
 function LibraryTab({
   exercises,
+  favoriteExerciseIds,
   membership,
   onOpenExercise,
+  onToggleFavorite,
 }: {
   exercises: Exercise[];
+  favoriteExerciseIds: string[];
   membership: MembershipState;
   onOpenExercise: (exercise: Exercise) => void;
+  onToggleFavorite: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
@@ -954,7 +1068,12 @@ function LibraryTab({
       maxToRenderPerBatch={6}
       removeClippedSubviews
       renderItem={({ item }) => (
-        <ExerciseListRow exercise={item} onPress={() => onOpenExercise(item)} />
+        <ExerciseListRow
+          exercise={item}
+          favorite={favoriteExerciseIds.includes(item.id)}
+          onPress={() => onOpenExercise(item)}
+          onToggleFavorite={() => onToggleFavorite(item.id)}
+        />
       )}
       showsVerticalScrollIndicator={false}
       updateCellsBatchingPeriod={60}
@@ -1031,7 +1150,7 @@ function ProfileTab({
         </View>
       </View>
 
-      <MembershipCard membership={membership} onRefresh={onMembershipRefresh} userId={userId} />
+      <MembershipCard membership={membership} onRefresh={onMembershipRefresh} onUpgrade={onRequestAuth} userId={userId} />
 
       <View className="flex-row gap-3">
         <ProgressStat label="Weight" value={profile.weight.toFixed(1)} suffix="kg" />
@@ -1163,7 +1282,7 @@ function ProfileTab({
   );
 }
 
-function MembershipCard({ membership, onRefresh, userId }: { membership: MembershipState; onRefresh: () => Promise<void>; userId: string }) {
+function MembershipCard({ membership, onRefresh, onUpgrade, userId }: { membership: MembershipState; onRefresh: () => Promise<void>; onUpgrade?: () => void; userId: string }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const planLabel = membership.plan === "free" ? "Free" : membership.plan === "plus" ? "Plus" : "Pro";
@@ -1181,7 +1300,7 @@ function MembershipCard({ membership, onRefresh, userId }: { membership: Members
   return (
     <View className="overflow-hidden rounded-[28px] border border-line bg-white" style={{ borderCurve: "continuous", boxShadow: "0 16px 38px rgba(17,19,24,.08)" }}>
       <LinearGradient colors={["#FFF1F3", "#FFFFFF"]} style={{ padding: 18 }}>
-        <View className="flex-row items-center justify-between"><View className="flex-row items-center gap-3"><View className="h-11 w-11 items-center justify-center rounded-2xl bg-electric"><Crown color="#fff" size={21} /></View><View><Text className="text-lg font-black text-bone">{planLabel} membership</Text><Text className="mt-0.5 text-xs font-semibold text-ash">{membership.videoAccess ? "Videos unlocked · No ads" : "All exercises · GIF guides · Ads"}</Text></View></View><Text className="rounded-full bg-electric/10 px-3 py-2 text-[10px] font-black uppercase text-electric">{planLabel}</Text></View>
+        <View className="flex-row items-center justify-between"><View className="flex-row items-center gap-3"><View className="h-11 w-11 items-center justify-center rounded-2xl bg-electric"><Crown color="#fff" size={21} /></View><View><Text className="text-lg font-black text-bone">{planLabel} membership</Text><Text className="mt-0.5 text-xs font-semibold text-ash">{membership.videoAccess ? "Videos unlocked · No ads" : "All exercises · GIF guides · Ads"}</Text></View></View>{membership.plan === "free" ? <Pressable accessibilityLabel="Upgrade membership" accessibilityRole="button" className="rounded-full bg-electric px-4 py-2" onPress={onUpgrade}><Text className="text-[10px] font-black uppercase text-white">Upgrade</Text></Pressable> : <Text className="rounded-full bg-electric/10 px-3 py-2 text-[10px] font-black uppercase text-electric">{planLabel}</Text>}</View>
         {membership.plan === "free" ? <Text className="mt-4 text-sm font-semibold leading-5 text-steel">Upgrade to Plus for owner-recorded exercise videos and an ad-free app. Pro also includes your own coach.</Text> : null}
         {membership.plan === "plus" ? <Text className="mt-4 text-sm font-semibold leading-5 text-steel">Your exercise videos are active. Upgrade to Pro when you want direct support from a dedicated coach.</Text> : null}
       </LinearGradient>
@@ -1328,7 +1447,7 @@ function PopularExerciseCard({ exercise, onPress }: { exercise: Exercise; onPres
   );
 }
 
-function ProgramRow({ program, onPress }: { program: TrainingProgram; onPress: () => void }) {
+function ProgramRow({ favorite, program, onPress, onToggleFavorite }: { favorite: boolean; program: TrainingProgram; onPress: () => void; onToggleFavorite: () => void }) {
   return (
     <Pressable
       accessibilityLabel={`Open ${program.title}`}
@@ -1349,12 +1468,14 @@ function ProgramRow({ program, onPress }: { program: TrainingProgram; onPress: (
           {program.target}
         </Text>
       </View>
-      <ChevronRight color={colors.steel} size={22} />
+      <Pressable accessibilityLabel={`${favorite ? "Remove" : "Add"} ${program.title} favorite`} accessibilityRole="button" className="h-10 w-10 items-center justify-center" onPress={(event) => { event.stopPropagation(); onToggleFavorite(); }}>
+        <Heart color={colors.accent} fill={favorite ? colors.accent : "transparent"} size={21} />
+      </Pressable>
     </Pressable>
   );
 }
 
-function ExerciseListRow({ exercise, onPress }: { exercise: Exercise; onPress: () => void }) {
+function ExerciseListRow({ exercise, favorite, onPress, onToggleFavorite }: { exercise: Exercise; favorite: boolean; onPress: () => void; onToggleFavorite: () => void }) {
   return (
     <Pressable
       accessibilityLabel={`Open ${exercise.name}`}
@@ -1382,7 +1503,9 @@ function ExerciseListRow({ exercise, onPress }: { exercise: Exercise; onPress: (
           ))}
         </View>
       </View>
-      <MoreVertical color={colors.muted} size={20} />
+      <Pressable accessibilityLabel={`${favorite ? "Remove" : "Add"} ${exercise.name} favorite`} accessibilityRole="button" className="h-10 w-10 items-center justify-center" onPress={(event) => { event.stopPropagation(); onToggleFavorite(); }}>
+        <Heart color={colors.accent} fill={favorite ? colors.accent : "transparent"} size={21} />
+      </Pressable>
     </Pressable>
   );
 }
