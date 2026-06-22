@@ -62,12 +62,13 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <AuthGate>
-          {({ email, isAuthenticated, isCloudEnabled, onRequestAuth, onSignOut, userId }) =>
+          {({ email, isAuthenticated, isCloudEnabled, onChoosePlan, onRequestAuth, onSignOut, userId }) =>
             isOnboardingComplete ? (
               <WorkoutPlannerScreen
                 accountEmail={email}
                 isAuthenticated={isAuthenticated}
                 isCloudEnabled={isCloudEnabled}
+                onChoosePlan={onChoosePlan}
                 onRequestAuth={onRequestAuth}
                 onSignOut={onSignOut}
                 storageScope={userId}

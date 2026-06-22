@@ -21,6 +21,7 @@ type AuthContext = {
   email: string | null;
   isAuthenticated: boolean;
   isCloudEnabled: boolean;
+  onChoosePlan: (plan: SignupPlan) => Promise<void>;
   onRequestAuth: () => void;
   onSignOut: () => Promise<void>;
   userId: string;
@@ -37,8 +38,8 @@ const pendingSignupPlanKey = "apex-gym:pending-signup-plan";
 const validSignupPlans = new Set<SignupPlan>(["free", "plus", "pro"]);
 const fallbackSignupPlans: SignupPlanOption[] = [
   { id: "free", name: "Free", price: "0 MAD", summary: "All exercises · GIF guides · Ads" },
-  { id: "plus", name: "Plus", price: "49 MAD", summary: "Exercise videos · No ads" },
-  { id: "pro", name: "Pro", price: "149 MAD", summary: "Videos · No ads · Personal coach" },
+  { id: "plus", name: "Plus", price: "79 MAD", summary: "Exercise videos · No ads" },
+  { id: "pro", name: "Pro", price: "199 MAD", summary: "Videos · No ads · Personal coach" },
 ];
 
 const redirectTo =
@@ -50,7 +51,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [applyingPlan, setApplyingPlan] = useState(false);
-  const [authVisible, setAuthVisible] = useState(false);
+  const [authVisible, setAuthVisible] = useState<"signIn" | "signUp" | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -69,7 +70,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) setAuthVisible(false);
+      if (session?.user) setAuthVisible(null);
     });
 
     return () => {
@@ -97,7 +98,21 @@ export function AuthGate({ children }: AuthGateProps) {
       email: user?.email ?? null,
       isAuthenticated: Boolean(user),
       isCloudEnabled: Boolean(supabase && user),
-      onRequestAuth: () => setAuthVisible(true),
+      onChoosePlan: async (plan) => {
+        storage.set(pendingSignupPlanKey, plan);
+        if (!user) {
+          setAuthVisible("signUp");
+          return;
+        }
+        setApplyingPlan(true);
+        try {
+          await activateTestPlan(user.id, plan);
+          storage.remove(pendingSignupPlanKey);
+        } finally {
+          setApplyingPlan(false);
+        }
+      },
+      onRequestAuth: () => setAuthVisible("signIn"),
       onSignOut: async () => {
         await supabase?.auth.signOut();
       },
@@ -120,19 +135,21 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (!user && authVisible) {
-    return <AuthScreen onClose={() => setAuthVisible(false)} />;
+    return <AuthScreen initialMode={authVisible} onClose={() => setAuthVisible(null)} />;
   }
 
   return children(authContext);
 }
 
-function AuthScreen({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
+function AuthScreen({ initialMode, onClose }: { initialMode: "signIn" | "signUp"; onClose: () => void }) {
+  const pendingPlan = storage.get<SignupPlan | null>(pendingSignupPlanKey, null);
+  const lockedPlan = pendingPlan && validSignupPlans.has(pendingPlan) ? pendingPlan : null;
+  const [mode, setMode] = useState<"signIn" | "signUp">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<SignupPlan>("free");
+  const [selectedPlan, setSelectedPlan] = useState<SignupPlan>(lockedPlan ?? "free");
   const [availablePlans, setAvailablePlans] = useState<SignupPlanOption[]>(fallbackSignupPlans);
 
   useEffect(() => {
@@ -317,10 +334,10 @@ function AuthScreen({ onClose }: { onClose: () => void }) {
         {mode === "signUp" ? (
           <View className="gap-2 py-1">
             <View className="flex-row items-end justify-between px-1">
-              <Text className="text-xs font-black uppercase text-ash">Choose your plan</Text>
+              <Text className="text-xs font-black uppercase text-ash">{lockedPlan ? "Selected plan" : "Choose your plan"}</Text>
               <Text className="text-[10px] font-black uppercase text-electric">Test access · No payment</Text>
             </View>
-            {availablePlans.map((plan) => {
+            {availablePlans.filter((plan) => !lockedPlan || plan.id === lockedPlan).map((plan) => {
               const selected = selectedPlan === plan.id;
               return (
                 <Pressable

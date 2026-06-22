@@ -20,6 +20,7 @@ import {
   Bell,
   BookOpen,
   CalendarDays,
+  Check,
   ChevronRight,
   Clock3,
   Dumbbell,
@@ -35,6 +36,7 @@ import {
   Search,
   Settings2,
   Trophy,
+  X,
 } from "lucide-react-native";
 
 import { colors } from "../../../theme/colors";
@@ -67,7 +69,7 @@ import {
   saveCloudSettings,
 } from "../services/userCloudData";
 import { configureWorkoutNotifications, syncWorkoutReminders } from "../services/workoutReminders";
-import { freeMembership, loadExerciseContent, loadMembership, loadProgramContent, sendMemberMessage, type MembershipState } from "../services/membership";
+import { freeMembership, loadExerciseContent, loadMembership, loadProgramContent, sendMemberMessage, type MembershipState, type PlanCode } from "../services/membership";
 import { syncOnboardingIntake } from "../services/member-intake";
 import { emptySavedContent, loadSavedContent, saveSavedContent, type SavedContent } from "../services/saved-content";
 import { buildAthleteProfile } from "../domain/recommendations";
@@ -206,6 +208,7 @@ type WorkoutPlannerScreenProps = {
   accountEmail?: string | null;
   isAuthenticated?: boolean;
   isCloudEnabled?: boolean;
+  onChoosePlan?: (plan: PlanCode) => Promise<void>;
   onRequestAuth?: () => void;
   onSignOut?: () => Promise<void>;
   storageScope?: string;
@@ -215,6 +218,7 @@ export function WorkoutPlannerScreen({
   accountEmail = null,
   isAuthenticated = false,
   isCloudEnabled = false,
+  onChoosePlan,
   onRequestAuth,
   onSignOut,
   storageScope = "local-device",
@@ -233,6 +237,7 @@ export function WorkoutPlannerScreen({
   const [progressCalendarVisible, setProgressCalendarVisible] = useState(false);
   const [profileEditorVisible, setProfileEditorVisible] = useState(false);
   const [programBuilderVisible, setProgramBuilderVisible] = useState(false);
+  const [planOffersVisible, setPlanOffersVisible] = useState(false);
   const [reminderVisible, setReminderVisible] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
   const [membership, setMembership] = useState<MembershipState>(freeMembership);
@@ -516,6 +521,7 @@ export function WorkoutPlannerScreen({
               membership={membership}
               userId={storageScope}
               onMembershipRefresh={async () => setMembership(await loadMembership(storageScope))}
+              onOpenPlanOffers={() => setPlanOffersVisible(true)}
               onRequestAuth={onRequestAuth}
               onEditProfile={() => setProfileEditorVisible(true)}
               onOpenReminder={() => setReminderVisible(true)}
@@ -551,6 +557,16 @@ export function WorkoutPlannerScreen({
         onClose={() => setProgramBuilderVisible(false)}
         onSave={(program) => updateSavedContent((current) => ({ ...current, myPrograms: [program, ...current.myPrograms.filter((item) => item.id !== program.id)] }))}
         visible={programBuilderVisible}
+      />
+      <PlanOffersSheet
+        currentPlan={membership.plan}
+        onClose={() => setPlanOffersVisible(false)}
+        onSelect={async (plan) => {
+          setPlanOffersVisible(false);
+          await onChoosePlan?.(plan);
+          if (isCloudEnabled) setMembership(await loadMembership(storageScope));
+        }}
+        visible={planOffersVisible}
       />
       <WorkoutSessionOverlay
         exercises={sessionExercises}
@@ -1093,6 +1109,7 @@ function ProfileTab({
   membership,
   userId,
   onMembershipRefresh,
+  onOpenPlanOffers,
   onRequestAuth,
   onEditProfile,
   onOpenReminder,
@@ -1109,6 +1126,7 @@ function ProfileTab({
   membership: MembershipState;
   userId: string;
   onMembershipRefresh: () => Promise<void>;
+  onOpenPlanOffers: () => void;
   onRequestAuth?: () => void;
   onEditProfile: () => void;
   onOpenReminder: () => void;
@@ -1150,7 +1168,7 @@ function ProfileTab({
         </View>
       </View>
 
-      <MembershipCard membership={membership} onRefresh={onMembershipRefresh} onUpgrade={onRequestAuth} userId={userId} />
+      <MembershipCard membership={membership} onRefresh={onMembershipRefresh} onUpgrade={onOpenPlanOffers} userId={userId} />
 
       <View className="flex-row gap-3">
         <ProgressStat label="Weight" value={profile.weight.toFixed(1)} suffix="kg" />
@@ -1279,6 +1297,68 @@ function ProfileTab({
         </Pressable>
       )}
     </ScrollView>
+  );
+}
+
+type PlanOffer = {
+  code: PlanCode;
+  name: string;
+  price: string;
+  description: string;
+  features: string[];
+};
+
+const fallbackPlanOffers: PlanOffer[] = [
+  { code: "free", name: "Free", price: "0 MAD", description: "Train with the complete exercise library.", features: ["All exercises", "GIF movement guides", "Personal workout tracking", "Includes ads"] },
+  { code: "plus", name: "Plus", price: "79 MAD / month", description: "More guidance without interruptions.", features: ["Everything in Free", "Owner-recorded exercise videos", "No ads", "Saved programs and favorites"] },
+  { code: "pro", name: "Pro", price: "199 MAD / month", description: "Direct coaching built around your progress.", features: ["Everything in Plus", "Dedicated personal coach", "Direct coach messaging", "Coach-built programs for you"] },
+];
+
+function PlanOffersSheet({ currentPlan, onClose, onSelect, visible }: { currentPlan: PlanCode; onClose: () => void; onSelect: (plan: PlanCode) => Promise<void>; visible: boolean }) {
+  const [plans, setPlans] = useState<PlanOffer[]>(fallbackPlanOffers);
+  const [selectedPlan, setSelectedPlan] = useState<PlanCode>(currentPlan === "pro" ? "pro" : currentPlan === "plus" ? "pro" : "plus");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !supabase) return;
+    let cancelled = false;
+    void supabase.from("plans").select("code,name,description,monthly_price,currency").eq("active", true).order("sort_order").then(({ data, error }) => {
+      if (cancelled || error || !data?.length) return;
+      setPlans(fallbackPlanOffers.map((fallback) => {
+        const live = data.find((plan) => plan.code === fallback.code);
+        return live ? { ...fallback, name: live.name, description: live.description || fallback.description, price: `${Number(live.monthly_price)} ${live.currency}${fallback.code === "free" ? "" : " / month"}` } : fallback;
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [visible]);
+
+  async function continueToAccount() {
+    if (selectedPlan === currentPlan || busy) return;
+    setBusy(true);
+    try { await onSelect(selectedPlan); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen" visible={visible}>
+      <SafeAreaView className="flex-1 bg-[#F7F8FC]">
+        <ScrollView contentContainerStyle={{ gap: 16, paddingBottom: 120, paddingHorizontal: 18, paddingTop: 16 }} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
+          <View className="flex-row items-start justify-between gap-4">
+            <View className="min-w-0 flex-1"><Text className="text-xs font-black uppercase tracking-[2px] text-electric">Membership</Text><Text className="mt-2 text-4xl font-black leading-[44px] text-bone">Choose your plan</Text><Text className="mt-2 text-sm font-semibold leading-6 text-ash">Compare every benefit first. Login or account creation comes after you choose.</Text></View>
+            <Pressable accessibilityLabel="Close plan offers" accessibilityRole="button" className="h-11 w-11 items-center justify-center rounded-full bg-white" onPress={onClose}><X color={colors.text} size={21} /></Pressable>
+          </View>
+          {plans.map((plan) => {
+            const selected = selectedPlan === plan.code;
+            const current = currentPlan === plan.code;
+            return <Pressable accessibilityLabel={`Select ${plan.name} plan`} accessibilityRole="button" accessibilityState={{ selected }} className={`rounded-[28px] border-2 p-5 ${selected ? "border-electric bg-[#FFF1F3]" : "border-line bg-white"}`} key={plan.code} onPress={() => { if (!current) setSelectedPlan(plan.code); }}>
+              <View className="flex-row items-start justify-between gap-4"><View className="min-w-0 flex-1"><View className="flex-row items-center gap-2"><Text className="text-2xl font-black text-bone">{plan.name}</Text>{current ? <Text className="rounded-full bg-carbon px-3 py-1 text-[9px] font-black uppercase text-steel">Current</Text> : null}</View><Text className="mt-2 text-sm font-semibold leading-5 text-ash">{plan.description}</Text></View><View className={`h-8 w-8 items-center justify-center rounded-full ${selected ? "bg-electric" : "border-2 border-line"}`}>{selected ? <Check color="#FFFFFF" size={18} strokeWidth={3} /> : null}</View></View>
+              <Text className="mt-4 text-lg font-black text-electric">{plan.price}</Text>
+              <View className="mt-4 gap-3">{plan.features.map((feature) => <View className="flex-row items-center gap-3" key={feature}><View className="h-6 w-6 items-center justify-center rounded-full bg-electric/10"><Check color={colors.accent} size={14} strokeWidth={3} /></View><Text className="min-w-0 flex-1 text-sm font-semibold text-steel">{feature}</Text></View>)}</View>
+            </Pressable>;
+          })}
+        </ScrollView>
+        <View className="absolute bottom-0 left-0 right-0 border-t border-line bg-white px-5 pb-5 pt-3"><Pressable accessibilityLabel="Continue with selected plan" accessibilityRole="button" className={`h-16 items-center justify-center rounded-[24px] bg-electric ${selectedPlan === currentPlan || busy ? "opacity-40" : ""}`} disabled={selectedPlan === currentPlan || busy} onPress={() => void continueToAccount()}><Text className="text-sm font-black uppercase text-white">{busy ? "Please wait..." : "Continue"}</Text></Pressable></View>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
