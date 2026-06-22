@@ -391,6 +391,7 @@ function DetailStepper({
       className="min-h-[68px] flex-row items-center justify-between rounded-[20px] border border-line bg-carbon px-3 py-2"
       style={{ boxShadow: "0 14px 28px rgba(17, 19, 24, 0.06)" }}
     >
+      <Text className="min-w-0 flex-1 pr-4 text-left text-[11px] font-black uppercase text-ash">{label}</Text>
       <View className="flex-row items-center">
         <Pressable
           accessibilityLabel={`Decrease ${label}`}
@@ -416,7 +417,6 @@ function DetailStepper({
           <Plus color="#FFFFFF" size={17} />
         </Pressable>
       </View>
-      <Text className="min-w-0 flex-1 pl-4 text-right text-[11px] font-black uppercase text-ash">{label}</Text>
     </View>
   );
 }
