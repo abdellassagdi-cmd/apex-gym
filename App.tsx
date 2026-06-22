@@ -73,7 +73,11 @@ export default function App() {
                 storageScope={userId}
               />
             ) : guestStarted || isAuthenticated ? (
-              <OnboardingFlow onComplete={() => setIsOnboardingComplete(true)} />
+              <OnboardingFlow
+                isAuthenticated={isAuthenticated}
+                onComplete={() => setIsOnboardingComplete(true)}
+                onRequireAuth={onRequestAuth}
+              />
             ) : (
               <EntryChoice onLogin={onRequestAuth} onSkip={() => setGuestStarted(true)} />
             )

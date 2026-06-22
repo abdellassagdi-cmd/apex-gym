@@ -29,6 +29,8 @@ export type OnboardingHealthProfile = {
 };
 
 export type OnboardingProfile = OnboardingHealthProfile & {
+  name: string;
+  selectedPlan: "free" | "plus" | "pro";
   gender: Gender | null;
   focusAreas: FocusArea[];
   mainGoal: MainGoal | null;

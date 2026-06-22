@@ -38,6 +38,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -76,6 +77,7 @@ type StepKey =
   | "splash"
   | "hero"
   | "coach"
+  | "name"
   | "gender"
   | "focus"
   | "goal"
@@ -104,7 +106,9 @@ type StepKey =
   | "award";
 
 type OnboardingFlowProps = {
+  isAuthenticated: boolean;
   onComplete: () => void;
+  onRequireAuth: () => void;
 };
 
 type Option<T extends string> = {
@@ -157,6 +161,7 @@ const imageAssets = {
 const steps: StepKey[] = [
   "splash",
   "hero",
+  "name",
   "gender",
   "focus",
   "goal",
@@ -265,6 +270,8 @@ const rewardOptions = [
 
 function createInitialProfile(): OnboardingProfile {
   return {
+    name: "",
+    selectedPlan: "free",
     gender: null,
     focusAreas: ["chest", "shoulders"],
     mainGoal: null,
@@ -306,7 +313,7 @@ function loadOnboardingDraft(): OnboardingDraft {
   };
 }
 
-export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
+export function OnboardingFlow({ isAuthenticated, onComplete, onRequireAuth }: OnboardingFlowProps) {
   const { width } = useWindowDimensions();
   const [stepIndex, setStepIndex] = useState(() => loadOnboardingDraft().stepIndex);
   const [profile, setProfile] = useState<OnboardingProfile>(() => loadOnboardingDraft().profile);
@@ -321,7 +328,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     step === "challenge" ||
     step === "award";
   const showProgress =
-    stepIndex >= steps.indexOf("gender") &&
+    stepIndex >= steps.indexOf("name") &&
     step !== "partBody" &&
     step !== "partAssessment" &&
     step !== "planReady" &&
@@ -358,6 +365,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
 
   const finishOnboarding = () => {
     storage.set("apex-gym:onboarding-profile", profile);
+    storage.remove("apex-gym:athlete-profile:local-device");
     storage.remove("apex-gym:onboarding-draft");
     onComplete();
   };
@@ -415,6 +423,8 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
             clearanceMessage: clearance.status === "restricted" ? clearance.message : null,
             onComplete,
             onFinish: finishOnboarding,
+            isAuthenticated,
+            onRequireAuth,
           })}
         </Animated.View>
       </View>
@@ -432,6 +442,8 @@ type RenderStepProps = {
   clearanceMessage: string | null;
   onComplete: () => void;
   onFinish: () => void;
+  isAuthenticated: boolean;
+  onRequireAuth: () => void;
 };
 
 function renderStep({
@@ -444,6 +456,8 @@ function renderStep({
   clearanceMessage,
   onComplete,
   onFinish,
+  isAuthenticated,
+  onRequireAuth,
 }: RenderStepProps) {
   switch (step) {
     case "splash":
@@ -453,6 +467,28 @@ function renderStep({
         storage.remove("apex-gym:onboarding-draft");
         onComplete();
       }} />;
+    case "name":
+      return (
+        <QuestionStep
+          title="What's your name?"
+          subtitle="We will use it to personalize your plan and profile."
+          footer={<NextButton disabled={!canGoNext} onPress={goNext} />}
+        >
+          <TextInput
+            accessibilityLabel="Your name"
+            autoCapitalize="words"
+            autoComplete="name"
+            autoCorrect={false}
+            className="h-16 rounded-[22px] border border-[#DDE1EA] bg-white px-5 text-xl font-black text-black"
+            maxLength={60}
+            onChangeText={(name) => updateProfile({ name })}
+            placeholder="Your full name"
+            placeholderTextColor="#9CA3AF"
+            returnKeyType="next"
+            value={profile.name}
+          />
+        </QuestionStep>
+      );
     case "coach":
       return <CoachStep onNext={goNext} />;
     case "gender":
@@ -753,7 +789,15 @@ function renderStep({
     case "planReady":
       return <PlanReadyStep profile={profile} onNext={goNext} />;
     case "paywall":
-      return <PaywallStep onNext={goNext} onSkip={onFinish} />;
+      return (
+        <PlanSelectionStep
+          isAuthenticated={isAuthenticated}
+          onNext={goNext}
+          onRequireAuth={onRequireAuth}
+          onSelect={(selectedPlan) => updateProfile({ selectedPlan })}
+          selectedPlan={profile.selectedPlan}
+        />
+      );
     case "award":
       return <AwardStep onComplete={onFinish} />;
     default:
@@ -762,6 +806,7 @@ function renderStep({
 }
 
 function validateStep(step: StepKey, profile: OnboardingProfile) {
+  if (step === "name") return profile.name.trim().length >= 2;
   if (step === "gender") return Boolean(profile.gender);
   if (step === "focus") return profile.focusAreas.length > 0;
   if (step === "goal") return Boolean(profile.mainGoal);
@@ -2035,66 +2080,71 @@ function PlanReadyStep({ profile, onNext }: { profile: OnboardingProfile; onNext
   );
 }
 
-function PaywallStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
-  return (
-    <View className="flex-1 justify-between px-7 pb-6 pt-8">
-      <View>
-        <View className="flex-row items-center justify-between">
-          <Pressable onPress={onSkip} className="h-12 w-12 items-center justify-center rounded-full bg-[#E1E4EC]">
-            <X color="#858B98" size={28} strokeWidth={3} />
-          </Pressable>
-          <Pressable onPress={onSkip}>
-            <Text className="text-xl font-bold text-[#6B7280] underline">Restore</Text>
-          </Pressable>
-        </View>
-        <View className="mt-8 items-center">
-          <Dumbbell color={black} size={74} strokeWidth={2.4} />
-          <Text className="mt-6 text-center text-5xl font-black italic leading-[56px] text-black">
-            GET YOUR PERSONALIZED PLAN
-          </Text>
-        </View>
-        <View className="mt-10 gap-5">
-          <PlanOption title="Free 7-Day Trial" price="US$39.99/year" weekly="US$0.83/week" hot />
-          <PlanOption title="Monthly Plan" price="US$9.99/month" weekly="US$2.50/week" />
-        </View>
-        <View className="mt-8 flex-row justify-center gap-2">
-          <Check color="#22C55E" size={24} strokeWidth={3} />
-          <Text className="text-xl font-bold text-black">No payment now</Text>
-        </View>
-      </View>
-      <NextButton label="Continue" accentBlue onPress={onNext} />
-    </View>
-  );
-}
-
-function PlanOption({
-  title,
-  price,
-  weekly,
-  hot,
+function PlanSelectionStep({
+  isAuthenticated,
+  onNext,
+  onRequireAuth,
+  onSelect,
+  selectedPlan,
 }: {
-  title: string;
-  price: string;
-  weekly: string;
-  hot?: boolean;
+  isAuthenticated: boolean;
+  onNext: () => void;
+  onRequireAuth: () => void;
+  onSelect: (plan: "free" | "plus" | "pro") => void;
+  selectedPlan: "free" | "plus" | "pro";
 }) {
+  const plans = [
+    { id: "free" as const, name: "Free", price: "0 MAD", detail: "All exercises · GIF guides · Ads" },
+    { id: "plus" as const, name: "Plus", price: "49 MAD / month", detail: "Exercise videos · No ads" },
+    { id: "pro" as const, name: "Pro", price: "149 MAD / month", detail: "Videos · No ads · Personal coach" },
+  ];
+
+  const continueWithPlan = () => {
+    if (selectedPlan !== "free" && !isAuthenticated) {
+      storage.set("apex-gym:pending-signup-plan", selectedPlan);
+      onRequireAuth();
+      return;
+    }
+    onNext();
+  };
+
   return (
-    <View
-      style={{ borderColor: hot ? accent : "transparent" }}
-      className={hot ? "rounded-[24px] border-4 bg-[#EAF3FF] p-5" : "rounded-[24px] border-4 bg-[#F1F3F8] p-5"}
-    >
-      <View className="flex-row items-center justify-between">
-        <View>
-          <Text className={hot ? "text-2xl font-black text-[#C5161D]" : "text-2xl font-black text-black"}>{title}</Text>
-          <Text className="mt-1 text-lg font-semibold text-[#4B5563]">{price}</Text>
-        </View>
-        <Text className="text-base font-bold text-[#6B7280]">{weekly}</Text>
-      </View>
-      {hot ? (
-        <View className="absolute -right-2 -top-5 rounded-xl bg-[#C5161D] px-4 py-2">
-          <Text className="text-sm font-black uppercase text-white">Hottest</Text>
-        </View>
-      ) : null}
+    <View className="flex-1 justify-between px-6 pb-6 pt-8">
+      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+        <Text className="text-xs font-black uppercase tracking-[2px] text-[#C5161D]">Your membership</Text>
+        <Text className="text-4xl font-black leading-[44px] text-black">Choose your plan</Text>
+        <Text className="mb-2 text-base font-semibold leading-6 text-[#6B7280]">
+          Start free without an account. Plus and Pro require an account before payment.
+        </Text>
+        {plans.map((plan) => {
+          const selected = selectedPlan === plan.id;
+          return (
+            <Pressable
+              accessibilityLabel={`${plan.name} plan`}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              className={`rounded-[26px] border-2 p-5 ${selected ? "border-[#C5161D] bg-[#FFF1F3]" : "border-[#E3E6ED] bg-white"}`}
+              key={plan.id}
+              onPress={() => onSelect(plan.id)}
+            >
+              <View className="flex-row items-center justify-between gap-4">
+                <View className="min-w-0 flex-1">
+                  <Text className="text-2xl font-black text-black">{plan.name}</Text>
+                  <Text className="mt-2 text-sm font-semibold leading-5 text-[#6B7280]">{plan.detail}</Text>
+                </View>
+                <View className={`h-8 w-8 items-center justify-center rounded-full ${selected ? "bg-[#C5161D]" : "border-2 border-[#CDD2DC]"}`}>
+                  {selected ? <Check color="#FFFFFF" size={18} strokeWidth={3} /> : null}
+                </View>
+              </View>
+              <Text className="mt-4 text-lg font-black text-[#C5161D]">{plan.price}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <NextButton
+        label={selectedPlan === "free" || isAuthenticated ? "Continue" : "Create account to continue"}
+        onPress={continueWithPlan}
+      />
     </View>
   );
 }

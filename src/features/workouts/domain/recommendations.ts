@@ -78,7 +78,7 @@ export function buildAthleteProfile(profile: OnboardingProfile): AthleteProfile 
     fitnessLevel: titleCaseLevel(profile.fitnessLevel),
     goal: formatGoal(profile.mainGoal),
     height: profile.heightCm,
-    name: "Apex Member",
+    name: profile.name.trim() || "Apex Member",
     preferredIntensity: formatIntensity(profile.preferredIntensity),
     trainingDaysPerWeek: profile.workoutDaysPerWeek,
     weight: profile.weightKg,
