@@ -74,6 +74,7 @@ import { syncOnboardingIntake } from "../services/member-intake";
 import { emptySavedContent, loadSavedContent, saveSavedContent, type SavedContent } from "../services/saved-content";
 import { buildAthleteProfile } from "../domain/recommendations";
 import type { OnboardingProfile } from "../../onboarding/types";
+import { purchaseRevenueCatPlan, restoreRevenueCatPurchases, syncRevenueCatIdentity } from "../../billing/revenuecat";
 import type { Exercise, MuscleGroup } from "../types";
 import { storage } from "../../../utils/storage";
 import { supabase } from "../../../lib/supabase";
@@ -357,6 +358,12 @@ export function WorkoutPlannerScreen({
   }, []);
 
   useEffect(() => {
+    void syncRevenueCatIdentity(isAuthenticated ? storageScope : null).catch((error) =>
+      console.warn("Could not configure RevenueCat", formatError(error)),
+    );
+  }, [isAuthenticated, storageScope]);
+
+  useEffect(() => {
     setAthleteProfile(initialAthleteProfile(storageScope));
     setReminderSettings(
       storage.get<WorkoutReminderSettings>(`${reminderKey}:${storageScope}`, defaultReminderSettings),
@@ -562,8 +569,13 @@ export function WorkoutPlannerScreen({
         currentPlan={membership.plan}
         onClose={() => setPlanOffersVisible(false)}
         onSelect={async (plan) => {
-          setPlanOffersVisible(false);
+          if (isAuthenticated && plan !== "free") await purchaseRevenueCatPlan(plan);
           await onChoosePlan?.(plan);
+          if (isCloudEnabled) setMembership(await loadMembership(storageScope));
+          setPlanOffersVisible(false);
+        }}
+        onRestore={async () => {
+          await restoreRevenueCatPurchases();
           if (isCloudEnabled) setMembership(await loadMembership(storageScope));
         }}
         visible={planOffersVisible}
@@ -1314,10 +1326,11 @@ const fallbackPlanOffers: PlanOffer[] = [
   { code: "pro", name: "Pro", price: "199 MAD / month", description: "Direct coaching built around your progress.", features: ["Everything in Plus", "Dedicated personal coach", "Direct coach messaging", "Coach-built programs for you"] },
 ];
 
-function PlanOffersSheet({ currentPlan, onClose, onSelect, visible }: { currentPlan: PlanCode; onClose: () => void; onSelect: (plan: PlanCode) => Promise<void>; visible: boolean }) {
+function PlanOffersSheet({ currentPlan, onClose, onRestore, onSelect, visible }: { currentPlan: PlanCode; onClose: () => void; onRestore: () => Promise<void>; onSelect: (plan: PlanCode) => Promise<void>; visible: boolean }) {
   const [plans, setPlans] = useState<PlanOffer[]>(fallbackPlanOffers);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>(currentPlan === "pro" ? "pro" : currentPlan === "plus" ? "pro" : "plus");
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     if (!visible || !supabase) return;
@@ -1335,7 +1348,8 @@ function PlanOffersSheet({ currentPlan, onClose, onSelect, visible }: { currentP
   async function continueToAccount() {
     if (selectedPlan === currentPlan || busy) return;
     setBusy(true);
-    try { await onSelect(selectedPlan); } finally { setBusy(false); }
+    setStatus("");
+    try { await onSelect(selectedPlan); } catch (error) { setStatus(formatError(error)); } finally { setBusy(false); }
   }
 
   return (
@@ -1346,6 +1360,7 @@ function PlanOffersSheet({ currentPlan, onClose, onSelect, visible }: { currentP
             <View className="min-w-0 flex-1"><Text className="text-xs font-black uppercase tracking-[2px] text-electric">Membership</Text><Text className="mt-2 text-4xl font-black leading-[44px] text-bone">Choose your plan</Text><Text className="mt-2 text-sm font-semibold leading-6 text-ash">Compare every benefit first. Login or account creation comes after you choose.</Text></View>
             <Pressable accessibilityLabel="Close plan offers" accessibilityRole="button" className="h-11 w-11 items-center justify-center rounded-full bg-white" onPress={onClose}><X color={colors.text} size={21} /></Pressable>
           </View>
+          <Pressable accessibilityLabel="Restore purchases" accessibilityRole="button" className="self-start rounded-full border border-line bg-white px-4 py-2" disabled={busy} onPress={() => { setBusy(true); setStatus(""); void onRestore().catch((error) => setStatus(formatError(error))).finally(() => setBusy(false)); }}><Text className="text-xs font-black text-electric">Restore purchases</Text></Pressable>
           {plans.map((plan) => {
             const selected = selectedPlan === plan.code;
             const current = currentPlan === plan.code;
@@ -1355,6 +1370,7 @@ function PlanOffersSheet({ currentPlan, onClose, onSelect, visible }: { currentP
               <View className="mt-4 gap-3">{plan.features.map((feature) => <View className="flex-row items-center gap-3" key={feature}><View className="h-6 w-6 items-center justify-center rounded-full bg-electric/10"><Check color={colors.accent} size={14} strokeWidth={3} /></View><Text className="min-w-0 flex-1 text-sm font-semibold text-steel">{feature}</Text></View>)}</View>
             </Pressable>;
           })}
+          {status ? <View className="rounded-[20px] bg-electric/10 p-4"><Text className="text-sm font-semibold leading-5 text-bone">{status}</Text></View> : null}
         </ScrollView>
         <View className="absolute bottom-0 left-0 right-0 border-t border-line bg-white px-5 pb-5 pt-3"><Pressable accessibilityLabel="Continue with selected plan" accessibilityRole="button" className={`h-16 items-center justify-center rounded-[24px] bg-electric ${selectedPlan === currentPlan || busy ? "opacity-40" : ""}`} disabled={selectedPlan === currentPlan || busy} onPress={() => void continueToAccount()}><Text className="text-sm font-black uppercase text-white">{busy ? "Please wait..." : "Continue"}</Text></Pressable></View>
       </SafeAreaView>
